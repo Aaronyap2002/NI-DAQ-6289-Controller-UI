@@ -204,19 +204,6 @@ class DAQmxController(QWidget):
         self.run_button.setEnabled(False)
         control_layout.addWidget(self.run_button, 0, 9)  # Adjust the row and column as needed
             
-        # Create separate preview plot widgets for each analog output channel
-        for i, ao_channel in enumerate(self.ao_channels):
-            preview_plot = pg.PlotWidget(title=f"Preview: {ao_channel}")
-            preview_plot.setLabel('left', 'Voltage', units='V')
-            preview_plot.setLabel('bottom', 'Sample')
-            preview_plot.showGrid(x=True, y=True)
-            preview_plot.setYRange(-10, 10, padding=0)
-            preview_plot.getAxis('left').setTicks([[(v, str(v)) for v in range(-10, 11, 2)]])
-            preview_plot.setFixedSize(300, 200)
-            self.ao_preview_plots[ao_channel] = preview_plot
-            plot_layout.addWidget(preview_plot, (i + len(self.ao_channels) + len(self.ai_channels)) // 2, 
-                                  (i + len(self.ao_channels) + len(self.ai_channels)) % 2)
-            
         # Create textboxes, labels, upload buttons, period, iterations fields, and set buttons for analog output channels
         for i, ao_channel in enumerate(self.ao_channels):
             ao_label = QLabel(f"Analog Output {ao_channel}")
@@ -258,20 +245,14 @@ class DAQmxController(QWidget):
             self.ai_max_voltages.append(ai_max_voltage)
 
             control_layout.addWidget(ai_label, i + len(self.ao_channels), 0)
-            control_layout.addWidget(ai_value_label, i + len(self.ao_channels), 1)
             control_layout.addWidget(QLabel("Terminal Config:"), i + len(self.ao_channels), 2)
             control_layout.addWidget(ai_terminal_config, i + len(self.ao_channels), 3)
-            control_layout.addWidget(QLabel("Sampling Rate:"), i + len(self.ao_channels), 4)
-            control_layout.addWidget(ai_sampling_rate, i + len(self.ao_channels), 5)
             control_layout.addWidget(QLabel("Min Voltage:"), i + len(self.ao_channels), 6)
             control_layout.addWidget(ai_min_voltage, i + len(self.ao_channels), 7)
             control_layout.addWidget(QLabel("Max Voltage:"), i + len(self.ao_channels), 8)
             control_layout.addWidget(ai_max_voltage, i + len(self.ao_channels), 9)
 
             self.ai_labels.append(ai_value_label)
-
-            # Start reading AI values
-            self.read_ai_value(ai_channel, ai_value_label, i)
         
         control_widget = QWidget()
         control_widget.setLayout(control_layout)
@@ -293,7 +274,18 @@ class DAQmxController(QWidget):
             plot_widget_ao.getAxis('left').setTicks([[(v, str(v)) for v in range(-10, 11, 2)]])
             plot_widget_ao.setFixedSize(300, 200)
             self.ao_plots[ao_channel] = plot_widget_ao
-            plot_layout.addWidget(plot_widget_ao, i // 2, i % 2)
+            plot_layout.addWidget(plot_widget_ao, i, 0)
+            
+            # Create separate preview plot widgets for each analog output channel
+            preview_plot = pg.PlotWidget(title=f"Preview: {ao_channel}")
+            preview_plot.setLabel('left', 'Voltage', units='V')
+            preview_plot.setLabel('bottom', 'Sample')
+            preview_plot.showGrid(x=True, y=True)
+            preview_plot.setYRange(-10, 10, padding=0)
+            preview_plot.getAxis('left').setTicks([[(v, str(v)) for v in range(-10, 11, 2)]])
+            preview_plot.setFixedSize(300, 200)
+            self.ao_preview_plots[ao_channel] = preview_plot
+            plot_layout.addWidget(preview_plot, i,1)
 
         for i, ai_channel in enumerate(self.ai_channels):
             plot_widget_ai = pg.PlotWidget(title=f"Analog Input Wave {ai_channel}")
@@ -304,7 +296,7 @@ class DAQmxController(QWidget):
             plot_widget_ai.getAxis('left').setTicks([[(v, str(v)) for v in range(-10, 11, 2)]])
             plot_widget_ai.setFixedSize(300, 200)
             self.ai_plots[ai_channel] = plot_widget_ai
-            plot_layout.addWidget(plot_widget_ai, (i + len(self.ao_channels)) // 2, (i + len(self.ao_channels)) % 2)
+            plot_layout.addWidget(plot_widget_ai,i,2)
 
         plot_widget = QWidget()
         plot_widget.setLayout(plot_layout)
@@ -322,7 +314,7 @@ class DAQmxController(QWidget):
         for i, ao_channel in enumerate(self.ao_channels):
             ao_reset_button = QPushButton("Reset")
             ao_reset_button.clicked.connect(partial(self.reset_ao_graph, ao_channel))
-            control_layout.addWidget(ao_reset_button, i, 11)  # Change the column to 7
+            control_layout.addWidget(ao_reset_button, i, 11)  
 
         # Add reset buttons for analog input graphs
         for i, ai_channel in enumerate(self.ai_channels):
@@ -338,13 +330,6 @@ class DAQmxController(QWidget):
             self.ao_read_labels.append(ao_read_label)
             control_layout.addWidget(ao_read_label, i, 7)  # Change the column to 7
 
-        # Add reset buttons for analog output graphs
-        for i, ao_channel in enumerate(self.ao_channels):
-            ao_reset_button = QPushButton("Reset")
-            ao_reset_button.clicked.connect(partial(self.reset_ao_graph, ao_channel))
-            control_layout.addWidget(ao_reset_button, i, 8)  # Change the column to 8
-
-        
     def set_ao_value(self, channel, textbox):
         try:
             value = float(textbox.text())
@@ -670,61 +655,6 @@ class DAQmxController(QWidget):
     def update_progress(self, value):
         self.progress_bar.setValue(value)
 
-    def read_ai_value(self, channel, label, index):
-        try:
-            task = nidaqmx.Task()
-            
-            terminal_config = getattr(TerminalConfiguration, self.ai_terminal_configs[index].currentText())
-            min_val = float(self.ai_min_voltages[index].text())
-            max_val = float(self.ai_max_voltages[index].text())
-            sample_rate = float(self.ai_sampling_rates[index].text())
-
-            task.ai_channels.add_ai_voltage_chan(
-                channel,
-                terminal_config=terminal_config,
-                min_val=min_val,
-                max_val=max_val
-            )
-
-            # Set up timing for finite acquisition
-            samples_to_read = 1000  # Number of samples to read each time
-            task.timing.cfg_samp_clk_timing(
-                rate=sample_rate,
-                sample_mode=AcquisitionType.FINITE,
-                samps_per_chan=samples_to_read
-            )
-
-            def update_ai_plot():
-                try:
-                    # Read data
-                    data = task.read(number_of_samples_per_channel=samples_to_read)
-                    data = np.clip(data, min_val, max_val)
-                    
-                    label.setText(f"{data[-1]:.2f}")  # Display the most recent value
-
-                    # Generate timestamps
-                    duration = samples_to_read / sample_rate
-                    timestamps = np.linspace(0, duration, samples_to_read)
-
-                    # Update plot
-                    self.update_ai_plot(channel, timestamps, data)
-
-                    # Restart the task for the next acquisition
-                    task.stop()
-                    task.start()
-
-                except Exception as e:
-                    print(f"Error updating AI plot: {str(e)}")
-
-            timer = pg.QtCore.QTimer()
-            timer.timeout.connect(update_ai_plot)
-            update_interval = max(100, int(1000 * samples_to_read / sample_rate))  # Update at most 10 times per second
-            timer.start(update_interval)
-
-        except nidaqmx.errors.DaqError as e:
-            QMessageBox.critical(self, "DAQ Error", f"Error reading AI value: {str(e)}")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Unexpected error: {str(e)}")
     
     def update_plot(self, channel, ao_timestamps, ao_values, ai_timestamps, ai_values):
         
